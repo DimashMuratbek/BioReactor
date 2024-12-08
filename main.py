@@ -5,8 +5,7 @@ from time import sleep, ticks_ms, ticks_diff
 import ujson
 
 # Wi-Fi credentials
-ssid = "HANZE-ZP11"  # Replace with your network SSID
-password = "sqr274YzW6"  # Replace with your network password
+# Replace with your network password
 
 # Connect to the Wi-Fi network
 station = network.WLAN(network.STA_IF)
