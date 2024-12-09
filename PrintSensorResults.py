@@ -10,12 +10,14 @@ import random
 import math
 import time
 from tsl2591 import Tsl2591
+import BME280
 
-
-# Initialzie Sensor
+# Initialzie Fluro Sensor
 i2c = SoftI2C(scl=Pin(22), sda=Pin(21))  # Adjust pins as per your setup
 tsl = Tsl2591()  # Initialize the TSL2591 sensor
 
+# Initialzie BME Sensor
+i2c = SoftI2C(scl=Pin(18), sda=Pin(19), freq=10000)
 
 #Flow sensor
 flow_frequency = 0  # Measures flow meter pulses
@@ -150,7 +152,8 @@ while True:
     lux_value = read_luminosity()  # Get only the lux value
 #     print(f"{lux_value:.6f}")
     
-    
+    bme = BME280.BME280(i2c=i2c)
+    temp = bme.temperature
     
     currentTime = time.ticks_ms()
     # Every second, calculate and print liters/hour
@@ -175,10 +178,10 @@ while True:
         f = open('datafile.csv', 'a')
         
         if (elapsed_time < 20):
-            store_headers = f"elapsed_time, pH, flow, luminosity\n"
+            store_headers = f"elapsed_time, temp, pH, flow, luminosity\n"
             f.write(store_headers)
         # Format and store values in CSV
-        data_string = f"{elapsed_time}, {pH}, {l_hour}, {lux_value}\n"
+        data_string = f"{elapsed_time}, {temp}, {pH}, {l_hour}, {lux_value}\n"
         f.write(data_string)
                 
         f.close()
@@ -186,10 +189,10 @@ while True:
     # Print variables with headers aligned
     if PRINT_ALL_DATA_VARIABLES:
         headers = (
-                "Time (s)\tpH\t\tFLow\tLuminosity"
+                "Time (s)\t temp\t pH \t FLow \t Luminosity"
         )
         values = (
-                f"Time: {elapsed_time}\t PH: {pH:.2f}\t Flow {l_hour:.2f}\t Luminosity: {lux_value:.2f}"
+                f"Time: {elapsed_time}\t Temperature: {temp}\t PH: {pH:.2f}\t Flow {l_hour:.2f}\t Luminosity: {lux_value:.2f}"
         )
 #         print(headers)
         print(values)
