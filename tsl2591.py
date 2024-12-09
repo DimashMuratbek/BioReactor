@@ -1,5 +1,6 @@
 # tsl2591 lux sensor interface
 import time
+from machine import SoftI2C, Pin
 
 VISIBLE = 2
 INFRARED = 1
@@ -47,14 +48,12 @@ GAIN_HIGH = 0x20
 GAIN_MAX = 0x30
 
 def _bytes_to_int(data):
-    return data[0] + (data[1]<<8)
+    return data[0] + (data[1] << 8)
 
-from machine import I2C, Pin
 class SMBusEmulator:
     __slots__ = ('i2c',)
     def __init__(self, scl_pinno=22, sda_pinno=21):
-        self.i2c = I2C(scl=Pin(scl_pinno, Pin.IN),
-                       sda=Pin(sda_pinno, Pin.IN))
+        self.i2c = SoftI2C(scl=Pin(scl_pinno, Pin.OUT), sda=Pin(sda_pinno, Pin.OUT))
 
     def write_byte_data(self, addr, cmd, val):
         buf = bytes([cmd, val])
@@ -64,18 +63,13 @@ class SMBusEmulator:
         assert cmd < 256
         buf = bytes([cmd])
         self.i2c.writeto(addr, buf)
-        data = self.i2c.readfrom(addr, 4)
+        data = self.i2c.readfrom(addr, 2)  # Only read 2 bytes for a word
         return _bytes_to_int(data)
 
-SENSOR_ADDRESS=0x29
+SENSOR_ADDRESS = 0x29
 
 class Tsl2591:
-    def __init__(
-                 self,
-                 sensor_id='tsl2591',
-                 integration=INTEGRATIONTIME_300MS,
-                 gain=GAIN_MED
-                 ):
+    def __init__(self, sensor_id='tsl2591', integration=INTEGRATIONTIME_300MS, gain=GAIN_MED):
         self.sensor_id = sensor_id
         self.bus = SMBusEmulator()
         self.integration_time = integration
@@ -91,20 +85,20 @@ class Tsl2591:
         self.enable()
         self.integration_time = integration
         self.bus.write_byte_data(
-                    SENSOR_ADDRESS,
-                    COMMAND_BIT | REGISTER_CONTROL,
-                    self.integration_time | self.gain
-                    )
+            SENSOR_ADDRESS,
+            COMMAND_BIT | REGISTER_CONTROL,
+            self.integration_time | self.gain
+        )
         self.disable()
 
     def set_gain(self, gain):
         self.enable()
         self.gain = gain
         self.bus.write_byte_data(
-                    SENSOR_ADDRESS,
-                    COMMAND_BIT | REGISTER_CONTROL,
-                    self.integration_time | self.gain
-                    )
+            SENSOR_ADDRESS,
+            COMMAND_BIT | REGISTER_CONTROL,
+            self.integration_time | self.gain
+        )
         self.disable()
 
     def calculate_lux(self, full, ir):
@@ -118,7 +112,7 @@ class Tsl2591:
             INTEGRATIONTIME_400MS: 400.,
             INTEGRATIONTIME_500MS: 500.,
             INTEGRATIONTIME_600MS: 600.,
-            }
+        }
         if self.integration_time in case_integ.keys():
             atime = case_integ[self.integration_time]
         else:
@@ -129,7 +123,7 @@ class Tsl2591:
             GAIN_MED: 25.,
             GAIN_HIGH: 428.,
             GAIN_MAX: 9876.,
-            }
+        }
 
         if self.gain in case_gain.keys():
             again = case_gain[self.gain]
@@ -145,27 +139,27 @@ class Tsl2591:
 
     def enable(self):
         self.bus.write_byte_data(
-                    SENSOR_ADDRESS,
-                    COMMAND_BIT | REGISTER_ENABLE,
-                    ENABLE_POWERON | ENABLE_AEN | ENABLE_AIEN
-                    )
+            SENSOR_ADDRESS,
+            COMMAND_BIT | REGISTER_ENABLE,
+            ENABLE_POWERON | ENABLE_AEN | ENABLE_AIEN
+        )
 
     def disable(self):
         self.bus.write_byte_data(
-                    SENSOR_ADDRESS,
-                    COMMAND_BIT | REGISTER_ENABLE,
-                    ENABLE_POWEROFF
-                    )
+            SENSOR_ADDRESS,
+            COMMAND_BIT | REGISTER_ENABLE,
+            ENABLE_POWEROFF
+        )
 
     def get_full_luminosity(self):
         self.enable()
-        time.sleep(0.120*self.integration_time+1)
+        time.sleep(0.120 * self.integration_time + 1)
         full = self.bus.read_word_data(
-                    SENSOR_ADDRESS, COMMAND_BIT | REGISTER_CHAN0_LOW
-                    )
+            SENSOR_ADDRESS, COMMAND_BIT | REGISTER_CHAN0_LOW
+        )
         ir = self.bus.read_word_data(
-                    SENSOR_ADDRESS, COMMAND_BIT | REGISTER_CHAN1_LOW
-                    )                    
+            SENSOR_ADDRESS, COMMAND_BIT | REGISTER_CHAN1_LOW
+        )                    
         self.disable()
         return full, ir
 
