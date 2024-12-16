@@ -6,6 +6,9 @@ import BME280
 import json
 from tsl2591 import Tsl2591
 
+buffer = []  # Initialize an empty buffer
+BUFFER_SIZE = 10  # Number of data entries to buffer before writing to flash
+
 # Fluro initialization
 i2c = SoftI2C(scl=Pin(18), sda=Pin(19))  # Adjust pins as per your setup
 tsl = Tsl2591()  # Initialize the TSL2591 sensor
@@ -49,6 +52,20 @@ for adc in [adcPH]:
     adc.atten(ADC.ATTN_11DB)
 
 manual_mode = False  # To track if button is pressed
+
+def save_to_csv(filename, data_buffer):
+    """Writes buffered data to a CSV file on internal storage."""
+    try:
+        with open(filename, "a") as file:  # Open file in append mode
+            if file.tell() == 0:  # Write headers if the file is empty
+                file.write("Elapsed_Time,Temperature,pH,Flow,Luminosity\n")
+            for entry in data_buffer:
+                file.write(entry + "\n")
+            file.flush()  # Ensure data is flushed to storage
+        print("Data saved to", filename)
+    except Exception as e:
+        print("Error writing to file:", e)
+
 
 def read_luminosity():
     full, ir = tsl.get_full_luminosity()
@@ -108,54 +125,59 @@ last_message_time = ticks_ms()
 pump_state = OFF
 led_state = OFF
 
+# Initialize data buffer and buffer size
+buffer = []  # List to temporarily hold sensor data
+BUFFER_SIZE = 10  # Number of records before saving to local storage
+
 while True:
+    # Read sensor data
     lux_value = read_luminosity()
-    # Read data from BME280 and assign them to variables
     bme = BME280.BME280(i2c=i2c)
-    temperature = bme.temperature
+    temperature = bme.temperature.replace('C', '')  # Removes "C"
+    elapsed_time = get_elapsed_time()  # Time since start
+    pH = read_sensor(adcPH, pH_SLOPE, pH_INTERCEPT, "pH")
 
-    temp = temperature.replace('C', '')  # Removes "C"
-
-    currentTime = time.ticks_ms()
-    # Every second, calculate and print liters/hour
-    if time.ticks_diff(currentTime, cloopTime) >= 10000:
-        cloopTime = currentTime  # Update cloopTime
-        # Pulse frequency (Hz) = 7.5Q, Q is flow rate in L/min. (Results in +/- 3% range)
+    # Calculate flow rate every 10 seconds
+    current_time = time.ticks_ms()
+    if time.ticks_diff(current_time, cloopTime) >= 10000:
+        cloopTime = current_time  # Update cloopTime
         l_hour = int((flow_frequency * 60) / 7.5)  # Calculate liters/hour
         flow_frequency = 0  # Reset counter
 
-    elapsed_time = get_elapsed_time()  # Track the time in seconds
-    # Read pH, Conductivity, and optical density
-    pH = read_sensor(adcPH, pH_SLOPE, pH_INTERCEPT, "pH")
+    # Format data for CSV
+    data_row = f"{elapsed_time},{temperature},{pH},{l_hour},{lux_value}"
+    print("Buffered Data:", data_row)
+    buffer.append(data_row)
 
-    if button.value() == 1:  # Button pressed
+    # Save data to local storage if buffer is full
+    if len(buffer) >= BUFFER_SIZE:
+        save_to_csv("sensor_data.csv", buffer)  # Write to local storage
+        buffer = []  # Clear the buffer
+
+    # Manual mode (button pressed)
+    if button.value() == 1:  # Button is pressed
         if not manual_mode:
             manual_mode = True
             print("Manual mode activated")
-
-        # Activate relays and read data while the button is pressed
         relayPump.value(ON)
         led.value(ON)
 
-        # Print sensor data continuously in manual mode
-        print(f"Temperature: {temp}, pH: {pH}, Flow: {l_hour}, Luminosity: {lux_value}")
-        sleep(0.5)  # Small delay for printing to avoid spamming
+        # Print sensor data in manual mode
+        print(f"Temperature: {temperature}, pH: {pH}, Flow: {l_hour}, Luminosity: {lux_value}")
+        sleep(0.5)  # Small delay to avoid spamming output
 
-    else:  # Button released
+    else:  # Button is released
         if manual_mode:
             manual_mode = False
             print("Manual mode deactivated, resuming scheduled operations")
 
-        # Deactivate relays if they were on due to manual mode
         relayPump.value(OFF)
         led.value(OFF)
 
-        # Continue with the scheduled operations
-        time_since_last_message = ticks_diff(ticks_ms(), last_message_time) / 1000  # Convert to seconds
-
+        # Scheduled operations
+        time_since_last_message = ticks_diff(ticks_ms(), last_message_time) / 1000
         if pump_state == OFF and time_since_last_message >= DATA_SEND_INTERVAL_SECONDS - PUMP_PRE_ON_TIME_SECONDS:
             pump_state = ON
-            led_state = ON
             relayPump.value(ON)
             led.value(ON)
             if DEBUG:
@@ -163,26 +185,25 @@ while True:
 
         elif pump_state == ON and time_since_last_message >= DATA_SEND_INTERVAL_SECONDS:
             pump_state = OFF
-            led_state = OFF
             relayPump.value(OFF)
             led.value(OFF)
             last_message_time = ticks_ms()
 
-            # Send sensor data
+            # Publish data to MQTT
             try:
                 sensor_data = {
-                    "temperature": temp,
+                    "temperature": temperature,
                     "pH": pH,
                     "flow": l_hour,
                     "luminosity": lux_value
                 }
                 client.publish(sensor_topic, json.dumps(sensor_data))
-                print(temp, ' ', pH, ' ', l_hour, ' ', lux_value)
+                print("Sent Data:", temperature, pH, l_hour, lux_value)
             except OSError as e:
                 restart_and_reconnect()
 
-        try:
-            client.check_msg()
-        except OSError as e:
-            restart_and_reconnect()
-
+    # Check for incoming MQTT messages
+    try:
+        client.check_msg()
+    except OSError as e:
+        restart_and_reconnect()
